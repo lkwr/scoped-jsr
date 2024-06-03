@@ -33,11 +33,15 @@ export class TarballCache {
   }
 
   async put(packageName: PackageName, version: SemVer, tarball: Tarball): Promise<void> {
-    await this.kv.set(["tarball", packageName, version], {
-      buffer: tarball.buffer.bytes(),
-      shasum: tarball.shasum,
-      integrity: tarball.integrity,
-    });
+    await this.kv.set(
+      ["tarball", packageName, version],
+      {
+        buffer: tarball.buffer.bytes(),
+        shasum: tarball.shasum,
+        integrity: tarball.integrity,
+      },
+      { expireIn: 60 * 60 * 1000 /* 1 hour */ }
+    );
   }
 
   async tryGet(
