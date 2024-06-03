@@ -14,6 +14,11 @@ hono.get("/:scope{@[a-z0-9]+}/:name{[a-z0-9_]+}", async (c) => {
   const url = new URL(c.req.url);
   const { scope, name } = c.req.param();
 
+  if (scope === "jsr") {
+    c.status(404);
+    return c.text("404 - Not Found");
+  }
+
   const jsrPackage = await getJsrPackage(scope, name);
 
   if (!jsrPackage) {
@@ -28,6 +33,11 @@ hono.get("/:scope{@[a-z0-9]+}/:name{[a-z0-9_]+}", async (c) => {
 
 hono.get("/:scope{@[a-z0-9]+}/:name{[a-z0-9_]+}/-/:version_tgz", async (c) => {
   const { scope, name, version_tgz } = c.req.param();
+
+  if (scope === "jsr") {
+    c.status(404);
+    return c.text("404 - Not Found");
+  }
 
   const version = SemVer.parse(version_tgz.replace(/\.tgz$/, ""));
   const jsrPackage = await getJsrPackage(scope, name);
