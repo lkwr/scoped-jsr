@@ -1,3 +1,10 @@
 {
-  "imports": {}
+  "imports": {
+    "@hono/hono": "jsr:@hono/hono",
+    "@hono/hono/logger": "jsr:@hono/hono/logger",
+    "@std/archive": "jsr:@std/archive",
+    "@std/encoding": "jsr:@std/encoding",
+    "@std/io": "jsr:@std/io",
+    "zod": "npm:zod@3.23.8"
+  }
 }

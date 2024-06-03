@@ -1,82 +1,68 @@
-const REGISTRY_URL = "https://npm.jsr.io";
+import { Hono } from "@hono/hono";
+import { logger } from "@hono/hono/logger";
+import { getJsrPackage } from "./npm/jsr.ts";
+import { createProxyRegistryPackage } from "./proxied/registry.ts";
+import { SemVer } from "./npm/types.ts";
+import { ZodError } from "zod";
+import { getTarball } from "./proxied/tarball.ts";
 
-const VALID_PATHNAME_REGEX = /^\/@[a-z0-9]+(\/|%2f)[a-z0-9_]+/;
-const PACKAGE_REGEX = /@([a-z0-9]+)\/([a-z0-9_]+)/;
+const hono = new Hono();
 
-type PackageResponse = {
-  name: string;
+hono.use(logger());
 
-  versions: Record<
-    string,
-    {
-      name: string;
-    }
-  >;
-};
+hono.get("/:scope{@[a-z0-9]+}/:name{[a-z0-9_]+}", async (c) => {
+  const url = new URL(c.req.url);
+  const { scope, name } = c.req.param();
 
-const transformPackageResponse = (
-  payload: PackageResponse,
-  newName: string
-): PackageResponse => {
-  payload.name = newName;
+  const jsrPackage = await getJsrPackage(scope, name);
 
-  Object.keys(payload.versions).forEach((version) => {
-    payload.versions[version].name = newName;
-  });
+  if (!jsrPackage) {
+    c.status(404);
+    return c.text("404 - Not Found");
+  }
 
-  return payload;
-};
+  const proxyPackage = await createProxyRegistryPackage(jsrPackage, url.origin);
 
-const transformUrlPathname = (pathname: string) => {
-  pathname = pathname.replace(/%2f/g, "/");
+  return c.json(proxyPackage);
+});
 
-  pathname = pathname.replace(PACKAGE_REGEX, (str, scope, name) =>
-    scope === "jsr" ? str : `@jsr/${scope}__${name}`
-  );
+hono.get("/:scope{@[a-z0-9]+}/:name{[a-z0-9_]+}/-/:version_tgz", async (c) => {
+  const { scope, name, version_tgz } = c.req.param();
 
-  return pathname;
-};
+  const version = SemVer.parse(version_tgz.replace(/\.tgz$/, ""));
+  const jsrPackage = await getJsrPackage(scope, name);
+  const packageVersion = jsrPackage?.versions[version];
 
-const extractPackageName = (pathname: string) => {
-  pathname = pathname.replace(/%2f/g, "/");
-  pathname = pathname.split("/").slice(1, 3).join("/");
-  return pathname;
-};
+  if (!packageVersion) {
+    c.status(404);
+    return c.text("404 - Not Found");
+  }
 
-Deno.serve(async (req) => {
+  const tarball = await getTarball(packageVersion);
+
+  return c.body(tarball.buffer.bytes(), { headers: { "content-type": "application/gzip" } });
+});
+
+hono.notFound((c) => {
+  c.status(400);
+  return c.text("400 - Bad Request");
+});
+
+hono.onError((err, c) => {
+  if (err instanceof ZodError) {
+    c.status(400);
+    return c.text("400 - Bad Request");
+  }
+
+  c.status(500);
+  return c.text("500 - Internal Server Error");
+});
+
+Deno.serve({ port: 8000 }, (req) => {
   const url = new URL(req.url);
+  url.pathname = url.pathname.replace(/%2f/g, "/");
 
-  if (!url.pathname.match(VALID_PATHNAME_REGEX))
-    return new Response(undefined, {
-      status: 400,
-    });
+  const newReq = new Request(url, req);
 
-  const newName = extractPackageName(url.pathname);
-
-  const newUrl = new URL(REGISTRY_URL);
-  newUrl.pathname = transformUrlPathname(url.pathname);
-
-  console.log(newUrl.pathname);
-
-  const newRequest = new Request(newUrl, {
-    method: req.method,
-    headers: req.headers,
-    body: req.body,
-  });
-
-  const response = await fetch(newRequest);
-
-  if (!response.ok || response.headers.get("content-type") !== "application/json")
-    return response;
-
-  const json = await response.json();
-
-  const transformed = transformPackageResponse(json as any, newName);
-
-  console.log(transformed);
-
-  return new Response(JSON.stringify(transformed), {
-    status: response.status,
-    headers: response.headers,
-  });
+  return hono.fetch(newReq);
 });
